@@ -3,7 +3,6 @@ package goconf
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
@@ -96,13 +95,13 @@ func Configure(mandatory ...string) {
 }
 
 func MustSource(s ...Source) {
-	if len(sources) == 0 {
+	if len(s) == 0 {
 		if errEnv != nil && errFile != nil && errConsul != nil {
 			log.Fatalln("no configuration loaded from any possible source")
 		}
 		return
 	}
-	for _, v := range sources {
+	for _, v := range s {
 		if err := Err(v); err != nil {
 			log.Fatalf("%+v\n", err)
 		}
