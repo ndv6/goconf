@@ -46,8 +46,12 @@ var (
 	errEnv, errFile, errConsul error
 )
 
+func init() {
+	Configure()
+}
+
 //Configure bootstrap configuration for this service identified by name
-func Configure(mandatory ...string) {
+func Configure() {
 	// first lets load .env file
 	if err := godotenv.Load(); err != nil {
 		errEnv = errors.Cause(err)
