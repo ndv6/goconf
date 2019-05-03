@@ -3,7 +3,6 @@ package goconf
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
@@ -39,16 +38,20 @@ var (
 	c    *viper.Viper
 	dirs = []string{
 		".",
-		"$HOME/.onelabs",
-		"/usr/local/etc/.onelabs",
-		"/etc/.onelabs",
+		"$HOME",
+		"/usr/local/etc",
+		"/etc",
 	}
 
 	errEnv, errFile, errConsul error
 )
 
+func init() {
+	Configure()
+}
+
 //Configure bootstrap configuration for this service identified by name
-func Configure(mandatory ...string) {
+func Configure() {
 	// first lets load .env file
 	if err := godotenv.Load(); err != nil {
 		errEnv = errors.Cause(err)
@@ -63,8 +66,6 @@ func Configure(mandatory ...string) {
 	if v := os.Getenv(EnvPrefixKey); len(v) > 0 {
 		prefix = v
 	}
-
-	log.Println(typ, fname, prefix)
 
 	// setup and configure viper instance
 	c = viper.New()
@@ -95,56 +96,39 @@ func Configure(mandatory ...string) {
 	if err := c.ReadInConfig(); err != nil {
 		errFile = errors.Cause(err)
 	}
-
-	if errEnv != nil && errConsul != nil && errFile != nil {
-		return
-	}
-
-	for _, v := range mandatory {
-		if c.Get(v) == nil {
-			log.Printf("configuration of [%s]\n", os.Getenv("ALERT_"+strings.ToUpper(v)))
-			log.Fatalf("configuration of [%s] is not defined\n", v)
-		}
-	}
 }
 
-//MustConfigured configure with given sources and ensure mandatory config keys exists
-func MustConfigured(sources []Source, mandatory ...string) {
-	Configure(mandatory...)
-	if len(sources) == 0 {
+func MustSource(s ...Source) {
+	if len(s) == 0 {
 		if errEnv != nil && errFile != nil && errConsul != nil {
 			log.Fatalln("no configuration loaded from any possible source")
 		}
 		return
 	}
-	for _, v := range sources {
-		switch v {
-		case SourceEnv:
-			if errEnv != nil {
-				log.Fatalf("%+v\n", errEnv)
-			}
-		case SourceFile:
-			if errFile != nil {
-				log.Fatalf("%+v\n", errFile)
-			}
-		case SourceConsul:
-			if errConsul != nil {
-				log.Fatalf("%+v\n", errConsul)
-			}
+	for _, v := range s {
+		if err := Err(v); err != nil {
+			log.Fatalf("%+v\n", err)
 		}
 	}
 }
 
-func ErrEnv() error {
-	return errEnv
+func MustLoad(s ...string) {
+	for _, k := range s {
+		if nil == c.Get(k) {
+			log.Fatalf("config [%s] is not defined\n", k)
+		}
+	}
 }
 
-func ErrFile() error {
-	return errFile
-}
-
-func ErrConsul() error {
-	return errConsul
+func Err(s Source) error {
+	switch s {
+	case SourceEnv:
+		return errEnv
+	case SourceConsul:
+		return errConsul
+	default:
+		return errFile
+	}
 }
 
 //Config retrieve config instance
