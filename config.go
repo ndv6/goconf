@@ -147,3 +147,7 @@ func GetString(k string) string {
 func GetInt(k string) int {
 	return c.GetInt(k)
 }
+
+func GetFloat64(k string) float64 {
+	return c.GetFloat64(k)
+}
