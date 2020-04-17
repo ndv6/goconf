@@ -151,3 +151,7 @@ func GetInt(k string) int {
 func GetFloat64(k string) float64 {
 	return c.GetFloat64(k)
 }
+
+func GetStringSlice(k string) []string {
+	return c.GetStringSlice(k)
+}
