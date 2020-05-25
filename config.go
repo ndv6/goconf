@@ -1,7 +1,6 @@
 package goconf
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -11,86 +10,152 @@ import (
 	"log"
 )
 
-type Source string
+type (
+	Source       string
+	RemoteOption struct {
+		Type string
+		DSN  string
+		Key  string
+	}
+	Option struct {
+		Type         string
+		Filename     string
+		Prefix       string
+		Dir          []string
+		RemoteOption *RemoteOption
+	}
+	With func(option *Option)
+)
 
 const (
-	// default values by convention
-	DefaultType     = "json"
-	DefaultFilename = "config"
+	EnvRemoteType = "GOCONF_RTYPE"
+	EnvRemoteDSN  = "GOCONF_RDSN"
+	EnvRemoteKey  = "GOCONF_RKEY"
 
-	// environment variable key names
-	EnvConsulHostKey = "GOCONF_CONSUL"
-	EnvTypeKey       = "GOCONF_TYPE"
-	EnvFileNameKey   = "GOCONF_FILENAME"
-	EnvPrefixKey     = "GOCONF_ENV_PREFIX"
+	EnvConfigType = "GOCONF_TYPE"
+	EnvConfigName = "GOCONF_FILENAME"
+	EnvEnvPrefix  = "GOCONF_ENV_PREFIX"
 
-	//configuration sources
 	SourceEnv    Source = "env"
 	SourceFile   Source = "file"
-	SourceConsul Source = "consul"
+	SourceRemote Source = "consul"
 )
 
 var (
-	typ    = DefaultType
-	fname  = DefaultFilename
-	prefix string
-
-	c    *viper.Viper
-	dirs = []string{
-		".",
-		"$HOME",
-		"/usr/local/etc",
-		"/etc",
+	defaultOption = Option{
+		Type:     "json",
+		Filename: "config",
+		Prefix:   "",
+		Dir: []string{
+			".",
+			"$HOME",
+			"/usr/local/etc",
+			"/etc",
+		},
+		RemoteOption: nil,
 	}
 
-	errEnv, errFile, errConsul error
+	errEnv, errFile, errRemote error
+
+	c *viper.Viper
 )
 
-func init() {
-	Configure()
+func WithType(t string) With {
+	//@todo limit supported types
+	return func(option *Option) {
+		option.Type = t
+	}
+}
+
+func WithFilename(f string) With {
+	return func(option *Option) {
+		option.Filename = f
+	}
+}
+
+func WithPrefix(p string) With {
+	return func(option *Option) {
+		option.Prefix = p
+	}
+}
+
+func WithDirs(s ...string) With {
+	return func(option *Option) {
+		option.Dir = s
+	}
+}
+
+func WithRemote(r RemoteOption) With {
+	return func(option *Option) {
+		option.RemoteOption = &r
+	}
+}
+
+func ConfigureOptions(options ...With) {
+	var opt = &defaultOption
+	for _, o := range options {
+		o(opt)
+	}
+	configure(*opt)
+}
+
+func Configure() {
+	configure(defaultOption)
 }
 
 //Configure bootstrap configuration for this service identified by name
-func Configure() {
+func configure(opt Option) {
 	// first lets load .env file
 	if err := godotenv.Load(); err != nil {
 		errEnv = errors.Cause(err)
 	}
 
-	if v := os.Getenv(EnvTypeKey); len(v) > 0 {
-		typ = v
+	// we override defined value based on given os env
+	{
+		var (
+			t = os.Getenv(EnvRemoteType)
+			d = os.Getenv(EnvRemoteDSN)
+			k = os.Getenv(EnvRemoteKey)
+		)
+		if t != "" && d != "" && k != "" {
+			opt.RemoteOption = &RemoteOption{t, d, k}
+		}
 	}
-	if v := os.Getenv(EnvFileNameKey); len(v) > 0 {
-		fname = v
+
+	if v := os.Getenv(EnvConfigType); v != "" {
+		opt.Type = v
 	}
-	if v := os.Getenv(EnvPrefixKey); len(v) > 0 {
-		prefix = v
+	if v := os.Getenv(EnvConfigName); v != "" {
+		opt.Filename = v
+	}
+	if v := os.Getenv(EnvEnvPrefix); v != "" {
+		opt.Prefix = v
 	}
 
 	// setup and configure viper instance
 	c = viper.New()
-	c.SetConfigType(typ)
-	c.SetConfigName(fname)
-	if len(prefix) > 0 {
-		c.SetEnvPrefix(prefix)
+	c.SetConfigType(opt.Type)
+	c.SetConfigName(opt.Filename)
+	if opt.Prefix != "" {
+		c.SetEnvPrefix(opt.Prefix)
 	}
 	c.AutomaticEnv()
 
-	// next we load from consul; only if consul host defined
-	if ch := os.Getenv(EnvConsulHostKey); ch != "" {
-		if err := c.AddRemoteProvider("consul", ch, fmt.Sprintf("/%s", fname)); err != nil {
-			errConsul = errors.Cause(err)
+	// next we load from remote; only if configuration given
+	if r := opt.RemoteOption; r != nil {
+		if err := c.AddRemoteProvider(r.Type, r.DSN, r.Key); err != nil {
+			errRemote = errors.Cause(err)
 		} else {
 			if err := c.ReadRemoteConfig(); err != nil {
-				errConsul = errors.Cause(err)
+				errRemote = errors.Cause(err)
 			}
 		}
 	} else {
-		errConsul = errors.New("failed loading remote source; ENV not defined")
+		errRemote = errors.New("no remote configuration given")
 	}
 
 	// last, we attempt to load from file in configured dir
-	for _, d := range dirs {
+	for _, d := range opt.Dir {
 		c.AddConfigPath(d)
 	}
 	if err := c.ReadInConfig(); err != nil {
@@ -100,7 +165,7 @@ func Configure() {
 
 func MustSource(s ...Source) {
 	if len(s) == 0 {
-		if errEnv != nil && errFile != nil && errConsul != nil {
+		if errEnv != nil && errFile != nil && errRemote != nil {
 			log.Fatalln("no configuration loaded from any possible source")
 		}
 		return
@@ -124,30 +189,17 @@ func Err(s Source) error {
 	switch s {
 	case SourceEnv:
 		return errEnv
-	case SourceConsul:
-		return errConsul
+	case SourceRemote:
+		return errRemote
 	default:
 		return errFile
 	}
 }
 
-//Config retrieve config instance
 func Config() *viper.Viper {
 	return c
 }
 
-func Get(k string) interface{} {
-	return c.Get(k)
-}
-
-func GetString(k string) string {
-	return c.GetString(k)
-}
-
-func GetInt(k string) int {
-	return c.GetInt(k)
-}
-
-func GetFloat64(k string) float64 {
-	return c.GetFloat64(k)
+func GetString(key string) string  {
+	return c.GetString(key)
 }
