@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -81,22 +82,15 @@ func Configure() {
 		if err := c.AddRemoteProvider("consul", ch, fname); err != nil {
 			errConsul = errors.Cause(err)
 		} else {
-			attempt := 0
-			maxAttempt := 10
+			connect := func() error { return c.ReadRemoteConfig() }
+			notify := func(err error, t time.Duration) { log.Println("[goconf]", err.Error(), t) }
+			b := backoff.NewExponentialBackOff()
+			b.MaxElapsedTime = 2 * time.Minute
 
-			for {
-				if err := c.ReadRemoteConfig(); err != nil {
-					if attempt == maxAttempt {
-						log.Printf("[goconf] giving up connecting to remote config after %d attempt", attempt)
-						errConsul = errors.Cause(err)
-						break
-					}
-					attempt++
-					log.Printf("[goconf] attempt %d connecting to remote config", attempt)
-					time.Sleep(10 * time.Second)
-					continue
-				}
-				break
+			err := backoff.RetryNotify(connect, b, notify)
+			if err != nil {
+				log.Printf("[goconf] giving up connecting to remote config ")
+				errConsul = errors.Cause(err)
 			}
 		}
 	} else {
