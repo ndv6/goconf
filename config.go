@@ -1,14 +1,15 @@
 package goconf
 
 import (
-	"fmt"
+	"log"
 	"os"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	_ "github.com/spf13/viper/remote"
-	"log"
 )
 
 type Source string
@@ -78,10 +79,17 @@ func Configure() {
 
 	// next we load from consul; only if consul host defined
 	if ch := os.Getenv(EnvConsulHostKey); ch != "" {
-		if err := c.AddRemoteProvider("consul", ch, fmt.Sprintf("/%s", fname)); err != nil {
+		if err := c.AddRemoteProvider("consul", ch, fname); err != nil {
 			errConsul = errors.Cause(err)
 		} else {
-			if err := c.ReadRemoteConfig(); err != nil {
+			connect := func() error { return c.ReadRemoteConfig() }
+			notify := func(err error, t time.Duration) { log.Println("[goconf]", err.Error(), t) }
+			b := backoff.NewExponentialBackOff()
+			b.MaxElapsedTime = 2 * time.Minute
+
+			err := backoff.RetryNotify(connect, b, notify)
+			if err != nil {
+				log.Printf("[goconf] giving up connecting to remote config ")
 				errConsul = errors.Cause(err)
 			}
 		}
