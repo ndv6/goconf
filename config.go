@@ -24,6 +24,8 @@ const (
 	EnvTypeKey       = "GOCONF_TYPE"
 	EnvFileNameKey   = "GOCONF_FILENAME"
 	EnvPrefixKey     = "GOCONF_ENV_PREFIX"
+	EnvHttpToken     = "GOCONF_HTTP_TOKEN"
+	EnvHttpTokenFile = "GOCONF_HTTP_TOKEN_FILE"
 
 	//configuration sources
 	SourceEnv    Source = "env"
