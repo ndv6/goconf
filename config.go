@@ -34,9 +34,9 @@ const (
 )
 
 var (
-	typ    = DefaultType
-	fname  = DefaultFilename
-	prefix string
+	typ           = DefaultType
+	fname         = DefaultFilename
+	prefix, token string
 
 	c    *viper.Viper
 	dirs = []string{
@@ -69,6 +69,12 @@ func Configure() {
 	if v := os.Getenv(EnvPrefixKey); len(v) > 0 {
 		prefix = v
 	}
+	if v := os.Getenv(EnvHttpToken); len(v) > 0 {
+		token = v
+	}
+	if v := os.Getenv(EnvHttpTokenFile); len(v) > 0 {
+		token = v
+	}
 
 	// setup and configure viper instance
 	c = viper.New()
@@ -77,11 +83,12 @@ func Configure() {
 	if len(prefix) > 0 {
 		c.SetEnvPrefix(prefix)
 	}
+
 	c.AutomaticEnv()
 
 	// next we load from consul; only if consul host defined
 	if ch := os.Getenv(EnvConsulHostKey); ch != "" {
-		if err := c.AddRemoteProvider("consul", ch, fname); err != nil {
+		if err := c.AddSecureRemoteProvider("consul", ch, fname, token); err != nil {
 			errConsul = errors.Cause(err)
 		} else {
 			connect := func() error { return c.ReadRemoteConfig() }
