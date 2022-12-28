@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	capi "github.com/hashicorp/consul/api"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -39,6 +40,7 @@ var (
 	prefix, token string
 
 	c    *viper.Viper
+	kv   *capi.Client
 	dirs = []string{
 		".",
 		"$HOME",
@@ -69,12 +71,6 @@ func Configure() {
 	if v := os.Getenv(EnvPrefixKey); len(v) > 0 {
 		prefix = v
 	}
-	if v := os.Getenv(EnvHttpToken); len(v) > 0 {
-		token = v
-	}
-	if v := os.Getenv(EnvHttpTokenFile); len(v) > 0 {
-		token = v
-	}
 
 	// setup and configure viper instance
 	c = viper.New()
@@ -88,31 +84,73 @@ func Configure() {
 
 	// next we load from consul; only if consul host defined
 	if ch := os.Getenv(EnvConsulHostKey); ch != "" {
-		if err := c.AddSecureRemoteProvider("consul", ch, fname, token); err != nil {
+		if err := c.AddRemoteProvider("consul", ch, fname); err != nil {
 			errConsul = errors.Cause(err)
 		} else {
-			connect := func() error { return c.ReadRemoteConfig() }
-			notify := func(err error, t time.Duration) { log.Println("[goconf]", err.Error(), t) }
-			b := backoff.NewExponentialBackOff()
-			b.MaxElapsedTime = 2 * time.Minute
-
-			err := backoff.RetryNotify(connect, b, notify)
+			err = c.ReadRemoteConfig()
 			if err != nil {
-				log.Printf("[goconf] giving up connecting to remote config ")
-				errConsul = errors.Cause(err)
+				NewConfigure()
+			} else {
+				connect := func() error { return c.ReadRemoteConfig() }
+				notify := func(err error, t time.Duration) { log.Println("[goconf]", err.Error(), t) }
+				b := backoff.NewExponentialBackOff()
+				b.MaxElapsedTime = 2 * time.Minute
+
+				err := backoff.RetryNotify(connect, b, notify)
+				if err != nil {
+					log.Printf("[goconf] giving up connecting to remote config ")
+					errConsul = errors.Cause(err)
+				}
+
+				// last, we attempt to load from file in configured dir
+				for _, d := range dirs {
+					c.AddConfigPath(d)
+				}
+				if err := c.ReadInConfig(); err != nil {
+					errFile = errors.Cause(err)
+				}
 			}
 		}
 	} else {
 		errConsul = errors.New("failed loading remote source; ENV not defined")
 	}
+}
 
-	// last, we attempt to load from file in configured dir
-	for _, d := range dirs {
-		c.AddConfigPath(d)
+func NewConfigure() {
+	// first lets load .env file
+	if err := godotenv.Load(); err != nil {
+		errEnv = errors.Cause(err)
 	}
-	if err := c.ReadInConfig(); err != nil {
-		errFile = errors.Cause(err)
+
+	if v := os.Getenv(EnvFileNameKey); len(v) > 0 {
+		fname = v
 	}
+	if v := os.Getenv(EnvHttpToken); len(v) > 0 {
+		token = v
+	}
+	if v := os.Getenv(EnvHttpTokenFile); len(v) > 0 {
+		token = v
+	}
+
+	client, err := capi.NewClient(&capi.Config{
+		Address: os.Getenv(EnvConsulHostKey),
+		Token:   token,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// Get a handle to the KV API
+	kv := client.KV()
+
+	// Lookup the pair
+	pair, _, err := kv.Get(fname, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	c = viper.New()
+	c.Unmarshal(pair.Value)
 }
 
 func MustSource(s ...Source) {
