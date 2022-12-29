@@ -2,6 +2,7 @@ package goconf
 
 import (
 	"bytes"
+	"io/ioutil"
 	"log"
 	"os"
 	"time"
@@ -22,10 +23,12 @@ const (
 	DefaultFilename = "config"
 
 	// environment variable key names
-	EnvConsulHostKey = "CONSUL_HTTP_ADDR"
+	EnvConsulHostKey = "GOCONF_CONSUL"
 	EnvTypeKey       = "GOCONF_TYPE"
 	EnvFileNameKey   = "GOCONF_FILENAME"
 	EnvPrefixKey     = "GOCONF_ENV_PREFIX"
+
+	EnvHttpAddr      = "CONSUL_HTTP_ADDR"
 	EnvHttpToken     = "CONSUL_HTTP_TOKEN"
 	EnvHttpTokenFile = "CONSUL_HTTP_TOKEN_FILE"
 
@@ -36,9 +39,9 @@ const (
 )
 
 var (
-	typ           = DefaultType
-	fname         = DefaultFilename
-	prefix, token string
+	typ                 = DefaultType
+	fname               = DefaultFilename
+	prefix, token, addr string
 
 	c    *viper.Viper
 	pair *capi.KVPair
@@ -77,9 +80,18 @@ func Configure() {
 	}
 	if v := os.Getenv(EnvHttpToken); len(v) > 0 {
 		token = v
+	} else if v := os.Getenv(EnvHttpTokenFile); len(v) > 0 {
+		fileContent, err := ioutil.ReadFile(v)
+		if err != nil {
+			log.Fatal(err)
+		}
+		token = string(fileContent)
 	}
-	if v := os.Getenv(EnvHttpTokenFile); len(v) > 0 {
-		token = v
+
+	if v := os.Getenv(EnvConsulHostKey); len(v) > 0 {
+		addr = v
+	} else if v := os.Getenv(EnvHttpAddr); len(v) > 0 {
+		addr = v
 	}
 
 	// setup and configure viper instance
@@ -93,14 +105,14 @@ func Configure() {
 	c.AutomaticEnv()
 
 	// next we load from consul; only if consul host defined
-	if ch := os.Getenv(EnvConsulHostKey); ch != "" {
+	if addr != "" {
 		if token == "" {
-			if err := c.AddRemoteProvider("consul", ch, fname); err != nil {
+			if err := c.AddRemoteProvider("consul", addr, fname); err != nil {
 				errConsul = errors.Cause(err)
 			}
 		} else {
 			client, err := capi.NewClient(&capi.Config{
-				Address: ch,
+				Address: addr,
 				Token:   token,
 			})
 			if err != nil {
