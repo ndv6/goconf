@@ -27,6 +27,7 @@ const (
 	EnvTypeKey       = "GOCONF_TYPE"
 	EnvFileNameKey   = "GOCONF_FILENAME"
 	EnvPrefixKey     = "GOCONF_ENV_PREFIX"
+	EnvPath          = "GOCONF_PATH"
 
 	EnvHttpAddr      = "CONSUL_HTTP_ADDR"
 	EnvHttpToken     = "CONSUL_HTTP_TOKEN"
@@ -39,9 +40,9 @@ const (
 )
 
 var (
-	typ                 = DefaultType
-	fname               = DefaultFilename
-	prefix, token, addr string
+	typ                       = DefaultType
+	fname                     = DefaultFilename
+	prefix, token, addr, path string
 
 	c    *viper.Viper
 	pair *capi.KVPair
@@ -69,8 +70,11 @@ func Configure() {
 	if v := os.Getenv(EnvTypeKey); len(v) > 0 {
 		typ = v
 	}
+	if v := os.Getenv(EnvPath); len(v) > 0 {
+		path = v
+	}
 	if v := os.Getenv(EnvFileNameKey); len(v) > 0 {
-		fname = v
+		fname = path + v
 	}
 	if v := os.Getenv(EnvPrefixKey); len(v) > 0 {
 		prefix = v
@@ -87,7 +91,6 @@ func Configure() {
 		}
 		token = string(fileContent)
 	}
-
 	if v := os.Getenv(EnvConsulHostKey); len(v) > 0 {
 		addr = v
 	} else if v := os.Getenv(EnvHttpAddr); len(v) > 0 {
